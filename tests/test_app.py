@@ -58,3 +58,15 @@ def test_uploaded_wav_processing_and_invalid_file():
     assert app.error
     assert 'denoised' not in app.session_state
     assert not app.exception
+
+
+def test_manual_multiple_ranges():
+    app = AppTest.from_file(APP, default_timeout=30).run()
+    app.radio[0].set_value('Démonstration synthétique').run()
+    next(w for w in app.selectbox if w.label == 'Nombre de passages de bruit').set_value(2).run()
+    assert len(app.number_input) == 4
+    app.number_input[2].set_value(3.7).run()
+    app.checkbox[0].check().run()
+    next(b for b in app.button if b.label == 'Débruiter l’enregistrement').click().run()
+    assert not app.exception
+    assert 'denoised' in app.session_state

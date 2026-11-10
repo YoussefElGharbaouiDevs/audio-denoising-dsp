@@ -64,3 +64,26 @@ def test_minimum_length_clip_and_nonstandard_rate():
 @pytest.mark.parametrize('settings', [{'strength':-1}, {'strength':np.nan}, {'max_reduction_db':37}])
 def test_invalid_settings(settings):
     with pytest.raises(ValueError): DenoiseSettings(**settings)
+
+
+def test_multiple_ranges_use_before_and_after_speech():
+    from audio_dsp.denoise import denoise_ranges
+    clean, noisy = synthetic_demo()
+    result = denoise_ranges(noisy, [(0, .6), (3.7, 4.)])
+    active = np.abs(clean.samples[:, 0]) > .005
+    assert snr_db(clean.samples[active], result.samples[active]) > snr_db(clean.samples[active], noisy.samples[active])+1
+    assert result.samples.shape == noisy.samples.shape
+
+
+def test_overlapping_ranges_do_not_double_weight_noise():
+    from audio_dsp.denoise import denoise_ranges
+    _, audio = synthetic_demo()
+    expected = denoise_ranges(audio, [(0, .6)])
+    actual = denoise_ranges(audio, [(.2,.6), (0,.4), (0,.6)])
+    np.testing.assert_allclose(actual.samples, expected.samples)
+
+
+def test_empty_ranges_are_rejected():
+    from audio_dsp.denoise import denoise_ranges
+    _, audio = synthetic_demo()
+    with pytest.raises(ValueError): denoise_ranges(audio, [])

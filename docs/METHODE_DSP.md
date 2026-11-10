@@ -38,3 +38,8 @@ Les tests automatisés utilisent des signaux harmoniques modulés, trois graines
 - [Rééchantillonnage polyphasé dans SciPy](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.resample_poly.html)
 
 Les fonctions STFT historiques de SciPy sont utilisées ici pour rendre les étapes explicites. Aucun modèle neuronal, entraînement ou service distant n’intervient dans le traitement.
+
+
+## Plusieurs passages de bruit
+
+Le mode manuel accepte de 1 à 5 intervalles, chacun d’au moins 150 ms. Les chevauchements sont fusionnés pour ne pas surpondérer les mêmes échantillons. La STFT est calculée séparément sur chaque passage : les extraits ne sont pas concaténés, ce qui évite une discontinuité artificielle. Le profil est la moyenne de toutes leurs trames. Il représente un bruit moyen, pas une estimation variant automatiquement avec le temps.

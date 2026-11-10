@@ -5,7 +5,7 @@ Application locale de **réduction du bruit vocal** et d’étude de **l’écha
 ## Fonctionnalités
 
 - Import WAV et MP3 lorsque le codec est disponible.
-- Écoute de l’original et sélection explicite d’un passage contenant uniquement du bruit.
+- Écoute de l’original et sélection explicite de 1 à 5 passages contenant uniquement du bruit (avant et après la parole, par exemple).
 - Soustraction spectrale de puissance : STFT, profil de bruit, masque lissé et reconstruction.
 - Réglage de l’intensité et du plancher d’atténuation.
 - Écoute et export WAV PCM 16 bits du résultat.

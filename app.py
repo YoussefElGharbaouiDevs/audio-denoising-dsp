@@ -6,7 +6,7 @@ import numpy as np
 import streamlit as st
 
 from audio_dsp.audio import AudioData, read_audio, resample_audio, wav_bytes
-from audio_dsp.denoise import DenoiseSettings, denoise, noise_segment
+from audio_dsp.denoise import DenoiseSettings, denoise_ranges, noise_segment
 from audio_dsp.evaluation import synthetic_demo, snr_db
 from audio_dsp.plots import comparison_figure
 
@@ -52,7 +52,7 @@ if audio is None:
     st.stop()
 
 if st.session_state.get("source_id") != source_id:
-    for key in ("denoised", "denoise_key", "sampled", "sample_key", "noise_start", "noise_end", "confirm_noise"):
+    for key in ("denoised", "denoise_key", "sampled", "sample_key", "noise_start", "noise_end", "confirm_noise", "range_count", *[f"noise_{side}_{i}" for i in range(1,5) for side in ("start", "end")]):
         st.session_state.pop(key, None)
     st.session_state["source_id"] = source_id
 
@@ -75,37 +75,46 @@ tab_denoise, tab_sampling, tab_method = st.tabs(["Débruitage", "Échantillonnag
 
 with tab_denoise:
     st.subheader("1 · Définir le profil de bruit")
-    st.write("Choisissez un passage sans parole, contenant le bruit à atténuer. Au moins 0,15 s ; idéalement 0,5 à 1 s.")
+    st.write("Choisissez un ou plusieurs passages de bruit seul, avant ou après la parole. Au moins 0,15 s par passage ; idéalement 0,5 à 1 s.")
     if audio.duration < .15:
         st.warning("Ce fichier est trop court pour estimer un profil de bruit. Importez un extrait plus long.")
     else:
         def reset_confirmation():
             st.session_state["confirm_noise"] = False
 
-        c1, c2 = st.columns(2)
-        start = c1.number_input("Début (secondes)", min_value=0., max_value=audio.duration, value=0., step=.05, format="%.3f", key="noise_start", on_change=reset_confirmation)
-        end = c2.number_input("Fin (secondes)", min_value=0., max_value=audio.duration, value=min(.6, audio.duration), step=.05, format="%.3f", key="noise_end", on_change=reset_confirmation)
-        selection = None
-        try:
-            selection = noise_segment(audio, start, end)
-            player(AudioData(selection, audio.sample_rate), "Écouter le passage sélectionné")
-            if np.max(abs(selection)) < 1e-7:
-                st.warning("Ce passage est presque silencieux : il ne fournit pas de profil de bruit représentatif.")
-        except ValueError as exc:
-            st.warning(str(exc))
-        confirmed = st.checkbox("J’ai écouté le passage et il contient uniquement du bruit, sans parole.", key="confirm_noise")
+        count = st.selectbox("Nombre de passages de bruit", [1, 2, 3, 4, 5], key="range_count", on_change=reset_confirmation)
+        ranges = []
+        valid_selection = True
+        for i in range(count):
+            st.markdown(f"**Passage {i+1}**")
+            c1, c2 = st.columns(2)
+            suffix = "" if i == 0 else f"_{i}"
+            default_start = 0. if i == 0 else max(0., audio.duration-.6)
+            default_end = min(.6, audio.duration) if i == 0 else audio.duration
+            start = c1.number_input(f"Début du passage {i+1} (s)", min_value=0., max_value=audio.duration, value=default_start, step=.05, format="%.3f", key="noise_start"+suffix, on_change=reset_confirmation)
+            end = c2.number_input(f"Fin du passage {i+1} (s)", min_value=0., max_value=audio.duration, value=default_end, step=.05, format="%.3f", key="noise_end"+suffix, on_change=reset_confirmation)
+            ranges.append((start, end))
+            try:
+                selection = noise_segment(audio, start, end)
+                player(AudioData(selection, audio.sample_rate), f"Écouter le passage {i+1}")
+                if np.max(abs(selection)) < 1e-7:
+                    st.warning("Ce passage est presque silencieux : il ne fournit pas de profil de bruit représentatif.")
+            except ValueError as exc:
+                valid_selection = False
+                st.warning(str(exc))
+        confirmed = st.checkbox("J’ai écouté les passages et ils contiennent uniquement du bruit, sans parole.", key="confirm_noise")
         st.subheader("2 · Régler et traiter")
         c1, c2 = st.columns(2)
         strength = c1.slider("Intensité de soustraction", 0., 4., 1.5, .1, help="0 désactive le traitement. Une valeur élevée risque d’altérer la voix.")
         reduction = c2.slider("Atténuation maximale du masque (dB)", 0, 36, 18, 1)
-        current_key = (source_id, start, end, strength, reduction)
+        current_key = (source_id, tuple(ranges), strength, reduction)
         if st.session_state.get("denoise_key") != current_key:
             st.session_state.pop("denoised", None)
-        if st.button("Débruiter l’enregistrement", type="primary", disabled=selection is None or not confirmed):
+        if st.button("Débruiter l’enregistrement", type="primary", disabled=not valid_selection or not confirmed):
             try:
                 with st.spinner("Analyse spectrale et reconstruction…"):
                     begin = time.perf_counter()
-                    result = denoise(audio, start, end, DenoiseSettings(strength, reduction))
+                    result = denoise_ranges(audio, ranges, DenoiseSettings(strength, reduction))
                     st.session_state["denoised"] = result
                     st.session_state["elapsed"] = time.perf_counter()-begin
                     st.session_state["denoise_key"] = current_key
@@ -158,7 +167,7 @@ with tab_method:
     st.subheader("Une méthode DSP explicable")
     st.markdown("""
 1. **STFT** : fenêtre de Hann de 32 ms et recouvrement de 75 %.
-2. **Profil de bruit** : moyenne de la puissance spectrale du passage sélectionné.
+2. **Profil de bruit** : moyenne de la puissance spectrale des passages sélectionnés, sans compter deux fois les chevauchements.
 3. **Soustraction spectrale** : masque de gain avec plancher d’atténuation.
 4. **Lissage** : 3 cases fréquentielles et 5 trames temporelles.
 5. **Reconstruction** : phase conservée, STFT inverse, durée et canaux conservés.
