@@ -35,6 +35,6 @@ Tests sur des signaux de référence auxquels du bruit est ajouté ; mesures du 
 
 ## État
 
-La base Python est disponible : lecture WAV/MP3, export WAV PCM 16 bits et rééchantillonnage anti-repliement. Le débruitage et l’interface sont les prochaines étapes.
+La base Python est disponible : lecture WAV/MP3, export WAV PCM 16 bits et rééchantillonnage anti-repliement. Le débruitage spectral est disponible et testé. Voir [la méthode DSP](docs/METHODE_DSP.md). L’interface est la prochaine étape.
 
 Installation : `python -m venv .venv`, puis `python -m pip install -r requirements.lock.txt` et `python -m pip install -e . --no-deps` dans l’environnement activé. Tests : `python -m pytest -q`.
