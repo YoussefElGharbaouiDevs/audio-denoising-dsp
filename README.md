@@ -35,4 +35,6 @@ Tests sur des signaux de référence auxquels du bruit est ajouté ; mesures du 
 
 ## État
 
-Initialisation du projet. Le code et les instructions d’exécution seront ajoutés lors des prochaines étapes.
+La base Python est disponible : lecture WAV/MP3, export WAV PCM 16 bits et rééchantillonnage anti-repliement. Le débruitage et l’interface sont les prochaines étapes.
+
+Installation : `python -m venv .venv`, puis `python -m pip install -r requirements.lock.txt` et `python -m pip install -e . --no-deps` dans l’environnement activé. Tests : `python -m pytest -q`.

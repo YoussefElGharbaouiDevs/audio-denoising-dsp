@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audio-denoising-dsp"
+version = "0.1.0"
+description = "Débruitage vocal et échantillonnage par traitement classique du signal"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "numpy>=2.2.6,<2.3",
+  "scipy>=1.15.3,<1.16",
+  "soundfile>=0.12,<1",
+  "matplotlib>=3.8,<4",
+  "streamlit>=1.40,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
