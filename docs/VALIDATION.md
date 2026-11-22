@@ -34,3 +34,12 @@ Sur un même extrait, comparer les versions 8, 16 et 48 kHz, en gardant le nombr
 ## Critères fonctionnels
 
 Vérifier l’import, les messages d’erreur, l’écoute du profil, le blocage d’un intervalle invalide, les deux lecteurs audio, les graphiques, le téléchargement et la lecture du WAV dans un lecteur indépendant. Vérifier qu’un changement de fichier ou de paramètres invalide l’ancien résultat.
+
+
+## Nouveaux parcours automatiques et multi-passages
+
+Vérifier que l’import déclenche le résultat en mode automatique sans case à cocher ni clic de traitement ; qu’un nouveau fichier et un changement de réglage recalculent ce résultat ; qu’un changement vers le mode manuel retire le résultat précédent tant que le traitement manuel n’est pas lancé.
+
+Les tests DSP couvrent du bruit uniquement après la parole, du bruit avant et après, le silence, un signal tonal continu (conservé en l’absence de contraste), des canaux stéréo en opposition de phase, les chevauchements d’intervalles et les entrées trop courtes. Les tests sur bruit blanc et coloré restent des cas synthétiques, pas une validation à l’écoute de voix réelles.
+
+Les huit WAV téléchargés dans Downloads ont été décodés et traités en automatique sans erreur, avec conservation de la forme des données. Ce contrôle de compatibilité n’atteste pas la qualité perceptive de leurs résultats.

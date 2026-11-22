@@ -7,6 +7,7 @@ import streamlit as st
 
 from audio_dsp.audio import AudioData, read_audio, resample_audio, wav_bytes
 from audio_dsp.denoise import DenoiseSettings, denoise_ranges, noise_segment
+from audio_dsp.automatic import denoise_auto
 from audio_dsp.evaluation import synthetic_demo, snr_db
 from audio_dsp.plots import comparison_figure
 
@@ -19,7 +20,7 @@ with st.sidebar:
     st.header("Votre enregistrement")
     source = st.radio("Source audio", ["Importer un fichier", "Démonstration synthétique"])
     st.caption("WAV ou MP3 · 25 Mo maximum · 120 secondes maximum · mono ou stéréo · 8 à 96 kHz")
-    st.markdown("**Parcours**\n\n1. Écouter l’original\n2. Sélectionner du bruit seul\n3. Débruiter et comparer\n4. Télécharger le WAV")
+    st.markdown("**Parcours**\n\n1. Importer un audio\n2. Débruitage automatique\n3. Écouter et comparer\n4. Télécharger le WAV")
     st.caption("Les fichiers audio restent en mémoire pendant la session. Aucun enregistrement n’est ajouté au dépôt.")
 
 reference = None
@@ -44,15 +45,15 @@ else:
             st.error(str(exc))
 
 if audio is None:
-    for key in ("source_id", "denoised", "denoise_key", "sampled", "sample_key", "decoded_id", "decoded_audio"):
+    for key in ("source_id", "auto_report", "denoised", "denoise_key", "sampled", "sample_key", "decoded_id", "decoded_audio"):
         st.session_state.pop(key, None)
     st.info("Importez un fichier pour commencer, ou choisissez la démonstration synthétique dans la barre latérale.")
     with st.expander("Comment fonctionne le débruitage ?"):
-        st.write("Une courte portion de bruit sert à estimer son spectre. Une soustraction spectrale atténue ensuite les composantes associées au bruit, puis le signal est reconstruit. Cette méthode fonctionne surtout sur le souffle et les bruits continus.")
+        st.write("Le mode automatique analyse les trames les moins énergétiques de tout le fichier pour estimer le bruit. Le mode manuel permet de sélectionner plusieurs passages de bruit seul. Une soustraction spectrale atténue ensuite les composantes associées au bruit, puis le signal est reconstruit. Cette méthode fonctionne surtout sur le souffle et les bruits continus.")
     st.stop()
 
 if st.session_state.get("source_id") != source_id:
-    for key in ("denoised", "denoise_key", "sampled", "sample_key", "noise_start", "noise_end", "confirm_noise", "range_count", *[f"noise_{side}_{i}" for i in range(1,5) for side in ("start", "end")]):
+    for key in ("auto_report", "denoised", "denoise_key", "sampled", "sample_key", "noise_start", "noise_end", "confirm_noise", "range_count", *[f"noise_{side}_{i}" for i in range(1,5) for side in ("start", "end")]):
         st.session_state.pop(key, None)
     st.session_state["source_id"] = source_id
 
@@ -74,57 +75,85 @@ channel = st.selectbox("Canal affiché dans les graphiques", list(range(audio.ch
 tab_denoise, tab_sampling, tab_method = st.tabs(["Débruitage", "Échantillonnage", "Méthode et limites"])
 
 with tab_denoise:
-    st.subheader("1 · Définir le profil de bruit")
-    st.write("Choisissez un ou plusieurs passages de bruit seul, avant ou après la parole. Au moins 0,15 s par passage ; idéalement 0,5 à 1 s.")
-    if audio.duration < .15:
-        st.warning("Ce fichier est trop court pour estimer un profil de bruit. Importez un extrait plus long.")
-    else:
-        def reset_confirmation():
-            st.session_state["confirm_noise"] = False
-
-        count = st.selectbox("Nombre de passages de bruit", [1, 2, 3, 4, 5], key="range_count", on_change=reset_confirmation)
-        ranges = []
-        valid_selection = True
-        for i in range(count):
-            st.markdown(f"**Passage {i+1}**")
-            c1, c2 = st.columns(2)
-            suffix = "" if i == 0 else f"_{i}"
-            default_start = 0. if i == 0 else max(0., audio.duration-.6)
-            default_end = min(.6, audio.duration) if i == 0 else audio.duration
-            start = c1.number_input(f"Début du passage {i+1} (s)", min_value=0., max_value=audio.duration, value=default_start, step=.05, format="%.3f", key="noise_start"+suffix, on_change=reset_confirmation)
-            end = c2.number_input(f"Fin du passage {i+1} (s)", min_value=0., max_value=audio.duration, value=default_end, step=.05, format="%.3f", key="noise_end"+suffix, on_change=reset_confirmation)
-            ranges.append((start, end))
-            try:
-                selection = noise_segment(audio, start, end)
-                player(AudioData(selection, audio.sample_rate), f"Écouter le passage {i+1}")
-                if np.max(abs(selection)) < 1e-7:
-                    st.warning("Ce passage est presque silencieux : il ne fournit pas de profil de bruit représentatif.")
-            except ValueError as exc:
-                valid_selection = False
-                st.warning(str(exc))
-        confirmed = st.checkbox("J’ai écouté les passages et ils contiennent uniquement du bruit, sans parole.", key="confirm_noise")
-        st.subheader("2 · Régler et traiter")
+    mode = st.radio("Mode de débruitage", ["Automatique", "Manuel — plusieurs passages"], horizontal=True, key="processing_mode")
+    with st.expander("Réglages du débruitage"):
         c1, c2 = st.columns(2)
         strength = c1.slider("Intensité de soustraction", 0., 4., 1.5, .1, help="0 désactive le traitement. Une valeur élevée risque d’altérer la voix.")
         reduction = c2.slider("Atténuation maximale du masque (dB)", 0, 36, 18, 1)
-        current_key = (source_id, tuple(ranges), strength, reduction)
+    settings = DenoiseSettings(strength, reduction)
+    run_processing = False
+    ranges = []
+    if audio.duration < .15:
+        st.warning("Ce fichier est trop court pour estimer le bruit. Importez un extrait d’au moins 0,15 seconde.")
+        st.session_state.pop("denoised", None)
+    else:
+        if mode == "Automatique":
+            st.caption("Le traitement démarre dès l’import. Les zones de faible énergie sont recherchées dans tout l’audio, y compris avant et après la parole.")
+            current_key = (source_id, "auto", strength, reduction)
+            run_processing = st.session_state.get("denoise_key") != current_key
+        else:
+            st.subheader("Choisir les passages de bruit seul")
+            st.write("Ajoutez un passage avant la parole et un autre après, par exemple. Chaque passage doit durer au moins 0,15 seconde et ne contenir aucune voix.")
+            def reset_confirmation():
+                st.session_state["confirm_noise"] = False
+
+            count = st.selectbox("Nombre de passages de bruit", [1, 2, 3, 4, 5], key="range_count", on_change=reset_confirmation)
+            valid_selection = True
+            for i in range(count):
+                st.markdown(f"**Passage {i+1}**")
+                c1, c2 = st.columns(2)
+                suffix = "" if i == 0 else f"_{i}"
+                default_start = 0. if i == 0 else max(0., audio.duration-.6)
+                default_end = min(.6, audio.duration) if i == 0 else audio.duration
+                start = c1.number_input(f"Début du passage {i+1} (s)", min_value=0., max_value=audio.duration, value=default_start, step=.05, format="%.3f", key="noise_start"+suffix, on_change=reset_confirmation)
+                end = c2.number_input(f"Fin du passage {i+1} (s)", min_value=0., max_value=audio.duration, value=default_end, step=.05, format="%.3f", key="noise_end"+suffix, on_change=reset_confirmation)
+                ranges.append((start, end))
+                try:
+                    selection = noise_segment(audio, start, end)
+                    player(AudioData(selection, audio.sample_rate), f"Écouter le passage {i+1}")
+                    if np.max(abs(selection)) < 1e-7:
+                        st.warning("Ce passage est presque silencieux : il ne fournit pas de profil de bruit représentatif.")
+                except ValueError as exc:
+                    valid_selection = False
+                    st.warning(str(exc))
+            confirmed = st.checkbox("J’ai écouté les passages et ils contiennent uniquement du bruit, sans parole.", key="confirm_noise")
+            current_key = (source_id, "manual", tuple(ranges), strength, reduction)
+            run_processing = st.button("Débruiter l’enregistrement", type="primary", disabled=not valid_selection or not confirmed)
+
         if st.session_state.get("denoise_key") != current_key:
             st.session_state.pop("denoised", None)
-        if st.button("Débruiter l’enregistrement", type="primary", disabled=not valid_selection or not confirmed):
+            st.session_state.pop("auto_report", None)
+        if run_processing:
             try:
-                with st.spinner("Analyse spectrale et reconstruction…"):
+                with st.spinner("Estimation du bruit et reconstruction du signal…"):
                     begin = time.perf_counter()
-                    result = denoise_ranges(audio, ranges, DenoiseSettings(strength, reduction))
+                    if mode == "Automatique":
+                        result, report = denoise_auto(audio, settings)
+                        st.session_state["auto_report"] = report
+                    else:
+                        result = denoise_ranges(audio, ranges, settings)
                     st.session_state["denoised"] = result
                     st.session_state["elapsed"] = time.perf_counter()-begin
                     st.session_state["denoise_key"] = current_key
             except ValueError as exc:
                 st.error(str(exc))
+
         if "denoised" in st.session_state:
             result = st.session_state["denoised"]
-            st.subheader("3 · Comparer le résultat")
-            encoded = player(result, "Enregistrement débruité")
+            st.subheader("Écouter le résultat")
+            report = st.session_state.get("auto_report")
+            if report is not None and not report.applied:
+                st.warning(report.message)
+            encoded = player(result, "Résultat du traitement" if report is None or report.applied else "Original conservé")
             st.caption(f"Traitement : {st.session_state['elapsed']:.3f} s · fréquence et canaux conservés · export WAV PCM 16 bits")
+            st.download_button("Télécharger le WAV résultat", encoded, "audio_resultat.wav", "audio/wav")
+            if report is not None:
+                with st.expander("Comment le bruit a été estimé"):
+                    st.write(report.message)
+                    st.write(f"{report.selected_frames} trames candidates sur {report.total_frames}. Contraste énergétique : {report.contrast_db:.1f} dB. Ce contraste n’est pas un SNR ni une probabilité de réussite.")
+                    st.caption("Les faibles énergies peuvent aussi correspondre à une voix douce. L’estimation automatique n’identifie pas les mots ni les locuteurs.")
+                    if report.candidate_ranges:
+                        st.write("Exemples de zones candidates (secondes) : " + "; ".join(f"{a:.2f}–{b:.2f}" for a,b in report.candidate_ranges[:12]))
             if reference is not None:
                 active = np.abs(reference.samples[:,0]) > .005
                 before_snr = snr_db(reference.samples[active], audio.samples[active])
@@ -134,8 +163,7 @@ with tab_denoise:
                 right.metric("SNR après · référence synthétique", f"{after_snr:.2f} dB", f"{after_snr-before_snr:+.2f} dB")
                 st.caption("Mesure sur les échantillons actifs de la référence. Elle ne remplace pas une évaluation sur de vraies voix.")
             st.pyplot(comparison_figure(audio, result, channel))
-            st.caption("Même échelle d’amplitude et même échelle de couleur pour les deux versions. Comparez aussi l’intelligibilité et les artefacts à l’écoute.")
-            st.download_button("Télécharger le WAV débruité", encoded, "audio_debruite.wav", "audio/wav")
+            st.caption("Même échelle d’amplitude et même échelle de couleur. Comparez aussi l’intelligibilité et les artefacts à l’écoute.")
 
 with tab_sampling:
     st.subheader("Explorer la fréquence d’échantillonnage")
@@ -167,12 +195,12 @@ with tab_method:
     st.subheader("Une méthode DSP explicable")
     st.markdown("""
 1. **STFT** : fenêtre de Hann de 32 ms et recouvrement de 75 %.
-2. **Profil de bruit** : moyenne de la puissance spectrale des passages sélectionnés, sans compter deux fois les chevauchements.
+2. **Profil de bruit** : estimation sur les trames de faible énergie de tout le fichier en automatique, ou moyenne des passages sélectionnés en manuel.
 3. **Soustraction spectrale** : masque de gain avec plancher d’atténuation.
 4. **Lissage** : 3 cases fréquentielles et 5 trames temporelles.
 5. **Reconstruction** : phase conservée, STFT inverse, durée et canaux conservés.
 
-Le traitement est adapté surtout aux bruits continus. Une sélection contenant de la parole peut dégrader la voix. Une forte réduction peut produire un son métallique. Le système ne sépare ni plusieurs locuteurs ni les instruments.
+Le mode automatique utilise une heuristique d’énergie, sans modèle appris. Si le contraste est insuffisant, il conserve l’original et le signale. Le traitement est adapté surtout aux bruits continus. Une sélection contenant de la parole peut dégrader la voix. Une forte réduction peut produire un son métallique. Le système ne sépare ni plusieurs locuteurs ni les instruments.
 
 Sans référence propre, nous ne présentons pas de gain de SNR calculé sur une voix réelle. Une réduction visible du spectrogramme ne prouve pas à elle seule une amélioration.
 

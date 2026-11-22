@@ -5,7 +5,8 @@ Application locale de **réduction du bruit vocal** et d’étude de **l’écha
 ## Fonctionnalités
 
 - Import WAV et MP3 lorsque le codec est disponible.
-- Écoute de l’original et sélection explicite de 1 à 5 passages contenant uniquement du bruit (avant et après la parole, par exemple).
+- Débruitage automatique dès l’import, sans sélectionner de passage ni cliquer sur un bouton de traitement.
+- Mode manuel optionnel : sélection de 1 à 5 passages contenant uniquement du bruit, avant et après la parole par exemple.
 - Soustraction spectrale de puissance : STFT, profil de bruit, masque lissé et reconstruction.
 - Réglage de l’intensité et du plancher d’atténuation.
 - Écoute et export WAV PCM 16 bits du résultat.
@@ -41,28 +42,28 @@ Depuis le dossier du projet :
 
 Ouvrir **http://127.0.0.1:8501**. Le serveur écoute uniquement sur la machine locale. `Ctrl+C` arrête le serveur. Le script `launch.ps1` propose également le lancement sous Windows et crée l’environnement s’il n’existe pas.
 
-### Essai rapide sans fichier personnel
+### Utilisation automatique
 
-1. Choisir **Démonstration synthétique** dans la barre latérale.
-2. Conserver le profil de bruit de **0 à 0,6 seconde**.
-3. Écouter ce passage puis cocher la confirmation.
-4. Cliquer sur **Débruiter l’enregistrement**.
-5. Écouter le résultat, examiner les graphiques et les mesures de SNR.
-6. Essayer l’onglet **Échantillonnage**, par exemple à 8 kHz.
+1. Choisir **Importer un fichier** et déposer un WAV ou MP3.
+2. Le mode **Automatique**, activé par défaut, estime le bruit sur l’ensemble du fichier et produit le résultat directement.
+3. Écouter l’original et le résultat puis cliquer sur **Télécharger le WAV résultat**.
+4. Si nécessaire, ouvrir **Réglages du débruitage** : le résultat automatique est recalculé quand un réglage change.
 
-Le signal de démonstration est harmonique et modulé : ce n’est pas une voix réelle et il ne prouve pas à lui seul la qualité perceptive du traitement sur la parole.
+Pour essayer sans fichier, choisir **Démonstration synthétique** dans la barre latérale. Le traitement démarre également tout seul. Ce signal harmonique modulé n’est pas une vraie voix ; le SNR affiché est une mesure sur ce cas contrôlé.
 
-### Utiliser une voix réelle
+L’algorithme recherche des trames de faible énergie dans tout l’audio. Il n’exige pas que le bruit soit au début : les portions avant, après ou entre les phrases peuvent contribuer à l’estimation. Une faible énergie ne garantit cependant pas l’absence de voix. Si le contraste est insuffisant, l’original est conservé et un message le précise.
 
-1. Importer un WAV ou MP3 contenant principalement une seule voix.
-2. Trouver un passage contenant le bruit seul, sans parole. L’application ne suppose pas que le début du fichier convient.
-3. Sélectionner au moins **0,15 s** ; si disponible, préférer **0,5 à 1 s** de bruit représentatif.
-4. Écouter le profil et confirmer sa sélection.
-5. Commencer avec l’intensité **1,5** et l’atténuation maximale **18 dB**.
-6. Comparer la compréhension des mots, les consonnes, le bruit résiduel et les artefacts. Réduire l’intensité si la voix devient métallique.
-7. Télécharger le WAV débruité.
+### Mode manuel avec plusieurs passages
 
-Si aucun passage ne contient uniquement du bruit, cette première méthode ne dispose pas d’un profil fiable. Choisir un autre enregistrement ou enregistrer quelques instants de bruit ambiant avec les mêmes conditions de captation.
+1. Choisir **Manuel — plusieurs passages**.
+2. Régler **Nombre de passages de bruit**, entre 1 et 5.
+3. Pour sélectionner le bruit avant et après la parole, saisir les deux intervalles séparément. Ne pas sélectionner un grand intervalle qui englobe la parole.
+4. Chaque passage doit contenir uniquement du bruit et durer au moins **0,15 s** ; préférer **0,5 à 1 s** quand c’est possible.
+5. Écouter chaque passage, cocher la confirmation puis cliquer sur **Débruiter l’enregistrement**.
+
+Les passages qui se chevauchent sont fusionnés afin de ne pas compter deux fois les mêmes données. Le profil moyen est estimé à partir des spectres de tous les passages.
+
+Les valeurs initiales sont une intensité de **1,5** et une atténuation maximale du masque de **18 dB**. Une atténuation plus forte peut déformer les consonnes ou produire une voix métallique. Aucun mode ne garantit un son totalement sans bruit.
 
 ## Limites et confidentialité
 
@@ -93,7 +94,8 @@ Les tests couvrent le filtrage anti-repliement, la conservation des canaux et de
 ```text
 app.py                       Interface Streamlit
 src/audio_dsp/audio.py       Lecture, export et rééchantillonnage
-src/audio_dsp/denoise.py      Traitement spectral classique
+src/audio_dsp/denoise.py      Traitement spectral et profils multiples
+src/audio_dsp/automatic.py    Estimation automatique du bruit
 src/audio_dsp/evaluation.py  Référence synthétique et SNR
 src/audio_dsp/plots.py       Comparaison des signaux
 tests/                      Tests DSP et interface
@@ -105,7 +107,7 @@ requirements.lock.txt       Versions testées
 
 ## Développement séquentiel
 
-Chaque partie est testée, commitée puis poussée séparément : documentation initiale, base audio, moteur DSP, interface. Les améliorations suivantes suivront le même principe. Ne pas regrouper plusieurs fonctionnalités indépendantes dans un seul push.
+Chaque partie est testée, commitée puis poussée séparément : documentation initiale, base audio, moteur DSP, interface, profils de bruit multiples, puis traitement automatique. Les améliorations suivantes suivront le même principe. Ne pas regrouper plusieurs fonctionnalités indépendantes dans un seul push.
 
 ## Références
 
